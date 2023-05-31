@@ -1,0 +1,109 @@
+version: '3.7'
+
+services:
+  traefik:
+    container_name: traefik
+    image: traefik:latest
+    restart: always
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - traefik
+    command:
+      - "--global.sendanonymoususage=false"
+      - "--global.checknewversion=false"
+      - "--entrypoints.http.address=:80"
+      - "--api=true"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--api.debug=false"
+      - "--ping=false"
+
+      - "--providers.docker=true"
+      - "--providers.docker.watch=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.swarmMode=false"
+      - "--providers.docker.useBindPortIP=false"
+      - "--providers.docker.network=traefik"
+      - "--providers.file=true"
+      - "--providers.file.watch=true"
+      - "--providers.file.directory=/etc/traefik/config"
+      - "--providers.file.debugloggeneratedtemplate=true"
+
+      # HTTPS
+      - "--entrypoints.https.address=:443"
+      - "--certificatesresolvers.default.acme.httpChallenge=true"
+      - "--certificatesresolvers.default.acme.httpChallenge.entrypoint=http"
+      - "--certificatesResolvers.default.acme.email=${ACME_EMAIL}"
+      - "--certificatesResolvers.default.acme.storage=/data/ssl/acme.json"
+
+      # Telemetry. Requires datadog-agent
+      - "--log.level=warn"
+      - "--log.format=common"
+      - "--accesslog=true"
+
+      - "--metrics.datadog=true"
+      - "--metrics.datadog.address=datadog-agent:8125"
+      - "--metrics.datadog.addServicesLabels=true"
+
+      - "--tracing.datadog=true"
+      - "--tracing.datadog.localAgentHostPort=datadog-agent:8126"
+
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/ssl/:/data/ssl/
+      - ./traefik/config/:/etc/traefik/config/:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.traefik-dash-web.entrypoints=https"
+      - "traefik.http.routers.traefik-dash-web.rule=Host(`${TRAEFIK_DASHBOARD_URL}`) && PathPrefix(`/`)"
+      - "traefik.http.routers.traefik-dash-web.tls=true"
+      - "traefik.http.routers.traefik-dash-web.tls.certresolver=default"
+      - "traefik.http.routers.traefik-dash-web.service=dashboard@internal"
+      - "traefik.http.routers.traefik-dash-api.entrypoints=https"
+      - "traefik.http.routers.traefik-dash-api.rule=Host(`${TRAEFIK_DASHBOARD_URL}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dash-api.tls=true"
+      - "traefik.http.routers.traefik-dash-api.service=api@internal"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+
+  datadog-agent:
+    image: datadog/agent:latest
+    container_name: datadog-agent
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - ./datadog-agent/conf.d:/etc/datadog-agent/conf.d
+    ports:
+      - "8125:8125/udp"
+      - "8126:8126/tcp"
+    networks:
+      - traefik
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=datadoghq.com
+      - DD_ENV=${DD_ENV}
+      - DD_TAGS=${DD_TAGS}
+      - DD_LOGS_ENABLED=true
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_PROCESS_AGENT_ENABLED=true
+      - DD_USE_DOGSTATSD=true
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+
+# docker network create traefik
+networks:
+  traefik:
+    external: true
