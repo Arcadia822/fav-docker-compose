@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  node_exporter:
+    container_name: node_exporter
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    volumes:
+      - ./:/host:ro,rslave
+    ports:
+      - ${NODE_EXPORTER_PORT}:9100
